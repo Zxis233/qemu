@@ -1,25 +1,21 @@
-name: Build QEMU 7.2 on Ubuntu 24.04
+name: Build QEMU 7.2 (Ubuntu 24.04, from repo source)
 
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Git ref to build (tag/branch/commit). Default: v7.2.0"
-        required: false
-        default: "v7.2.0"
-      extra_configure_flags:
-        description: "Extra flags passed to ./configure"
-        required: false
-        default: ""
-      enable_kvm:
-        description: "Enable KVM acceleration"
-        type: boolean
-        required: false
-        default: true
-      targets:
-        description: "Comma-separated target list"
+      target_list:
+        description: "QEMU target list"
         required: false
         default: "riscv64-softmmu,riscv64-linux-user"
+      extra_configure_flags:
+        description: "Extra flags for ./configure"
+        required: false
+        default: ""
+      build_docs:
+        description: "Build docs (requires sphinx)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -30,124 +26,71 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
           submodules: recursive
 
-      - name: Show system info
-        run: |
-          uname -a
-          lsb_release -a || true
-          gcc --version
-          clang --version || true
-          python3 --version
-          ninja --version || true
-
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            git \
-            build-essential \
-            ninja-build \
-            pkg-config \
-            python3 \
-            python3-pip \
-            python3-venv \
-            libglib2.0-dev \
-            libpixman-1-dev \
-            zlib1g-dev \
-            libfdt-dev \
-            libcapstone-dev \
-            libslirp-dev \
-            libaio-dev \
-            libattr1-dev \
-            libcap-ng-dev \
-            libiscsi-dev \
-            libnfs-dev \
-            libseccomp-dev \
-            liburing-dev \
-            libusb-1.0-0-dev \
-            libvdeplug-dev \
-            libepoxy-dev \
-            libgtk-3-dev \
-            libsdl2-dev \
-            libspice-server-dev \
-            libpulse-dev \
-            libasound2-dev \
-            libjack-jackd2-dev \
-            libcurl4-openssl-dev \
-            libgnutls28-dev \
-            nettle-dev \
-            libnuma-dev \
-            libbz2-dev \
-            liblzo2-dev \
-            libsnappy-dev \
-            flex \
-            bison \
-            meson \
-            gettext \
-            xsltproc \
-            docbook-xml \
-            docbook-xsl
+            autoconf automake autotools-dev curl libmpc-dev libmpfr-dev libgmp-dev \
+            gawk build-essential bison flex texinfo gperf libtool patchutils bc \
+            zlib1g-dev libexpat1-dev pkg-config libglib2.0-dev libpixman-1-dev \
+            git tmux python3 wget xz-utils ninja-build meson \
+            libslirp-dev libfdt-dev libcapstone-dev
+
+      - name: Install doc dependencies (optional)
+        if: ${{ inputs.build_docs == true }}
+        run: |
+          set -euxo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            python3-sphinx sphinx-rtd-theme-common
 
       - name: Configure
         run: |
           set -euxo pipefail
-          rm -rf build
-      
-          KVM_FLAG="--disable-kvm"
-          if [ "${{ inputs.enable_kvm }}" = "true" ]; then
-            KVM_FLAG="--enable-kvm"
+
+          DOC_FLAG="--disable-docs"
+          if [ "${{ inputs.build_docs }}" = "true" ]; then
+            DOC_FLAG="--enable-docs"
           fi
-      
+
           ./configure \
-            --prefix=/usr/local \
-            --target-list="${{ inputs.targets }}" \
-            --enable-slirp \
-            --enable-libusb \
-            --enable-gnutls \
-            --enable-curl \
-            --enable-vnc \
-            --enable-spice \
-            --enable-sdl \
-            --enable-gtk \
-            --enable-pa \
-            --enable-alsa \
-            --enable-jack \
-            --enable-capstone \
-            --enable-fdt \
-            ${KVM_FLAG} \
+            --target-list="${{ inputs.target_list }}" \
+            ${DOC_FLAG} \
             ${{ inputs.extra_configure_flags }}
 
       - name: Build
         run: |
           set -euxo pipefail
-          ninja -C build -v
+          make -j"$(nproc)"
 
-      - name: Run basic version check
+      - name: Show versions
         run: |
           set -euxo pipefail
-          ./build-ci/qemu-system-riscv64 --version || true
-          ./build-ci/qemu-riscv64 --version || true
-          ./build-ci/qemu-img --version || true
+          ./build/qemu-system-riscv64 --version || true
+          ./build/qemu-riscv64 --version || true
+          ./build/qemu-img --version || true
 
-      - name: Package artifacts
+      - name: Pack artifacts
         run: |
           set -euxo pipefail
           mkdir -p artifacts
-          cp -av build-ci/qemu-system-* artifacts/ 2>/dev/null || true
-          cp -av build-ci/qemu-* artifacts/ 2>/dev/null || true
-          tar -C artifacts -czf qemu-7.2-ubuntu24-${{ github.run_number }}.tar.gz .
+          cp -a build/qemu-system-* artifacts/ || true
+          cp -a build/qemu-riscv64 artifacts/ || true
+          cp -a build/qemu-img artifacts/ || true
+          cp -a build/qemu-io artifacts/ || true
+          cp -a build/qemu-nbd artifacts/ || true
+          tar -C artifacts -czf qemu-7.2.0-ubuntu24-artifacts.tar.gz .
 
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-7.2-ubuntu24-${{ github.run_number }}
+          name: qemu-7.2.0-ubuntu24
           path: |
-            qemu-7.2-ubuntu24-${{ github.run_number }}.tar.gz
+            qemu-7.2.0-ubuntu24-artifacts.tar.gz
             artifacts/
           if-no-files-found: warn
