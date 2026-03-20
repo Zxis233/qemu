@@ -120,7 +120,6 @@ jobs:
             --enable-jack \
             --enable-capstone \
             --enable-fdt \
-            --enable-docs \
             ${KVM_FLAG} \
             ${{ inputs.extra_configure_flags }}
 
