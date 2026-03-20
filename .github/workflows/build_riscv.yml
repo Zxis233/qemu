@@ -94,18 +94,16 @@ jobs:
             docbook-xml \
             docbook-xsl
 
-      - name: Configure (robust out-of-tree build dir)
+      - name: Configure
         run: |
           set -euxo pipefail
-
-          BUILD_DIR="build-ci"
-          rm -rf "${BUILD_DIR}"
-
+          rm -rf build
+      
           KVM_FLAG="--disable-kvm"
           if [ "${{ inputs.enable_kvm }}" = "true" ]; then
             KVM_FLAG="--enable-kvm"
           fi
-
+      
           ./configure \
             --prefix=/usr/local \
             --target-list="${{ inputs.targets }}" \
@@ -124,13 +122,12 @@ jobs:
             --enable-fdt \
             --enable-docs \
             ${KVM_FLAG} \
-            --build-dir="${BUILD_DIR}" \
             ${{ inputs.extra_configure_flags }}
 
       - name: Build
         run: |
           set -euxo pipefail
-          ninja -C build-ci -v
+          ninja -C build -v
 
       - name: Run basic version check
         run: |
