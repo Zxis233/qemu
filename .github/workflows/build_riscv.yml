@@ -17,9 +17,9 @@ on:
         required: false
         default: true
       targets:
-        description: "Comma-separated target list (e.g. x86_64-softmmu,aarch64-softmmu)"
+        description: "Comma-separated target list"
         required: false
-        default: "x86_64-softmmu,aarch64-softmmu"
+        default: "riscv64-softmmu,riscv64-linux-user"
 
 permissions:
   contents: read
@@ -94,21 +94,18 @@ jobs:
             docbook-xml \
             docbook-xsl
 
-      - name: Prepare build directory
+      - name: Configure (robust out-of-tree build dir)
         run: |
           set -euxo pipefail
-          mkdir -p build
 
-      - name: Configure
-        run: |
-          set -euxo pipefail
+          BUILD_DIR="build-ci"
+          rm -rf "${BUILD_DIR}"
 
           KVM_FLAG="--disable-kvm"
           if [ "${{ inputs.enable_kvm }}" = "true" ]; then
             KVM_FLAG="--enable-kvm"
           fi
 
-          # QEMU 7.2 uses ./configure (Meson backend)
           ./configure \
             --prefix=/usr/local \
             --target-list="${{ inputs.targets }}" \
@@ -127,27 +124,34 @@ jobs:
             --enable-fdt \
             --enable-docs \
             ${KVM_FLAG} \
+            --build-dir="${BUILD_DIR}" \
             ${{ inputs.extra_configure_flags }}
 
       - name: Build
         run: |
           set -euxo pipefail
-          # build output is in ./build after configure
-          ninja -C build -v
+          ninja -C build-ci -v
 
       - name: Run basic version check
         run: |
           set -euxo pipefail
-          ./build/qemu-system-x86_64 --version || true
-          ./build/qemu-system-aarch64 --version || true
+          ./build-ci/qemu-system-riscv64 --version || true
+          ./build-ci/qemu-riscv64 --version || true
+          ./build-ci/qemu-img --version || true
+
+      - name: Package artifacts
+        run: |
+          set -euxo pipefail
+          mkdir -p artifacts
+          cp -av build-ci/qemu-system-* artifacts/ 2>/dev/null || true
+          cp -av build-ci/qemu-* artifacts/ 2>/dev/null || true
+          tar -C artifacts -czf qemu-7.2-ubuntu24-${{ github.run_number }}.tar.gz .
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-7.2-ubuntu24-build
+          name: qemu-7.2-ubuntu24-${{ github.run_number }}
           path: |
-            build/qemu-system-*
-            build/qemu-img
-            build/qemu-io
-            build/qemu-nbd
+            qemu-7.2-ubuntu24-${{ github.run_number }}.tar.gz
+            artifacts/
           if-no-files-found: warn
